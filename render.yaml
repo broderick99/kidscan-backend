@@ -1,0 +1,56 @@
+databases:
+  - name: kidscan-db
+    databaseName: kidscan
+    user: kidscan_user
+    region: oregon # or your preferred region
+    plan: starter # 1GB storage, $7/month
+
+services:
+  - type: web
+    name: kidscan-api
+    runtime: node
+    region: oregon # same as database
+    plan: starter # $7/month
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: API_PREFIX
+        value: api/v1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kidscan-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 1h
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      # AWS S3 Configuration - Add these in Render dashboard as they're sensitive
+      - key: AWS_S3_REGION
+        value: us-east-1
+      - key: AWS_S3_BUCKET
+        value: kidscan-uploads
+      - key: AWS_ACCESS_KEY_ID
+        sync: false # Add manually in Render dashboard
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false # Add manually in Render dashboard
+      # Stripe Configuration - Add these in Render dashboard
+      - key: STRIPE_SECRET_KEY
+        sync: false # Add manually in Render dashboard
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false # Add manually in Render dashboard
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false # Add manually in Render dashboard
+      # File Upload Config
+      - key: MAX_FILE_SIZE
+        value: "5242880" # 5MB
+      - key: ALLOWED_FILE_TYPES
+        value: "image/jpeg,image/jpg,image/png,image/webp"
