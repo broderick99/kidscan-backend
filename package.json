@@ -21,8 +21,7 @@
     "db:migrate": "node dist/scripts/migrate.js",
     "db:seed": "node dist/scripts/seed.js",
     "db:reset": "node dist/scripts/reset-db.js",
-    "migrate": "npm run build && npm run db:migrate",
-    "postinstall": "npm run build"
+    "migrate": "npm run build && npm run db:migrate"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.932.0",

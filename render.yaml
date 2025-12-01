@@ -12,7 +12,7 @@ services:
     region: oregon # same as database
     plan: starter # $7/month
     buildCommand: npm install && npm run build
-    startCommand: npm run start:prod
+    startCommand: node --max-old-space-size=512 dist/main
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
