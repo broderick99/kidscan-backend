@@ -41,4 +41,14 @@ export class UpdateHomeDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @ApiProperty({ required: false, description: 'Indicates if the homeowner is seeking a teen helper' })
+  @IsBoolean()
+  @IsOptional()
+  seekingHelper?: boolean;
+
+  @ApiProperty({ required: false, description: 'Timestamp when help was requested' })
+  @IsString()
+  @IsOptional()
+  seekingHelperRequestedAt?: string;
 }

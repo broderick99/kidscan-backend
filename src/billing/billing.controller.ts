@@ -34,6 +34,47 @@ export class BillingController {
     return this.billingService.createSetupIntent(userId);
   }
 
+  @Post('create-setup-session')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create Stripe Checkout session for payment method setup' })
+  @ApiResponse({ status: 200, description: 'Checkout session created successfully' })
+  async createSetupSession(
+    @Request() req,
+    @Body() body: { 
+      homeId?: number; 
+      planType?: 'single_can' | 'double_can' | 'triple_can';
+      successUrl?: string;
+      cancelUrl?: string;
+    }
+  ) {
+    const userId = req.user?.userId || req.user?.id;
+    
+    if (!userId) {
+      throw new Error('User ID not found in request');
+    }
+    
+    return this.billingService.createCheckoutSetupSession(userId, body);
+  }
+
+  @Post('create-portal-session')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create Stripe Customer Portal session for managing payment methods' })
+  @ApiResponse({ status: 200, description: 'Portal session created successfully' })
+  async createPortalSession(
+    @Request() req,
+    @Body() body: { 
+      returnUrl?: string;
+    }
+  ) {
+    const userId = req.user?.userId || req.user?.id;
+    
+    if (!userId) {
+      throw new Error('User ID not found in request');
+    }
+    
+    return this.billingService.createCustomerPortalSession(userId, body.returnUrl);
+  }
+
   @Get('status')
   @ApiOperation({ summary: 'Get billing status for user' })
   @ApiResponse({ status: 200, description: 'Billing status retrieved successfully' })

@@ -104,6 +104,8 @@ export class HomesService {
       zipCode: 'zip_code',
       specialInstructions: 'special_instructions',
       isActive: 'is_active',
+      seekingHelper: 'seeking_helper',
+      seekingHelperRequestedAt: 'seeking_helper_requested_at',
     };
 
     Object.entries(updateHomeDto).forEach(([key, value]) => {

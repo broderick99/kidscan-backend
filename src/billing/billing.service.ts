@@ -60,6 +60,70 @@ export class BillingService {
     }
   }
 
+  async createCheckoutSetupSession(userId: number, options: {
+    homeId?: number;
+    planType?: 'single_can' | 'double_can' | 'triple_can';
+    successUrl?: string;
+    cancelUrl?: string;
+  }) {
+    try {
+      const customer = await this.getOrCreateCustomer(userId);
+      
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const successUrl = options.successUrl || `${frontendUrl}/dashboard?payment=success`;
+      const cancelUrl = options.cancelUrl || `${frontendUrl}/dashboard?payment=cancelled`;
+
+      // Create a Checkout session in setup mode for saving payment methods
+      const session = await this.stripe.checkout.sessions.create({
+        mode: 'setup',
+        customer: customer.id,
+        payment_method_types: ['card'],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: {
+          userId: userId.toString(),
+          homeId: options.homeId?.toString() || '',
+          planType: options.planType || 'single_can',
+        },
+        // Customer portal settings for managing payment methods later
+        customer_update: {
+          address: 'auto',
+          name: 'auto',
+        },
+      });
+
+      return {
+        sessionId: session.id,
+        url: session.url,
+      };
+    } catch (error) {
+      console.error('Error creating checkout session:', error);
+      throw new BadRequestException('Failed to create checkout session');
+    }
+  }
+
+  async createCustomerPortalSession(userId: number, returnUrl?: string) {
+    try {
+      const customer = await this.getOrCreateCustomer(userId);
+      
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const portalReturnUrl = returnUrl || `${frontendUrl}/dashboard`;
+
+      // Create a portal session for the customer
+      const session = await this.stripe.billingPortal.sessions.create({
+        customer: customer.id,
+        return_url: portalReturnUrl,
+      });
+
+      return {
+        url: session.url,
+      };
+    } catch (error) {
+      console.error('Error creating customer portal session:', error);
+      throw new BadRequestException('Failed to create customer portal session');
+    }
+  }
+
   async getOrCreateCustomer(userId: number): Promise<Stripe.Customer> {
     // Check if customer already exists in our database
     const result = await this.databaseService.query(
@@ -366,8 +430,9 @@ export class BillingService {
 
   async validatePaymentMethod(userId: number): Promise<boolean> {
     const billingStatus = await this.getBillingStatus(userId);
-    return billingStatus.hasPaymentMethod && 
-           billingStatus.subscriptionStatus === 'active';
+    // Only check if payment method exists, not subscription status
+    // Subscription will be created after service creation
+    return billingStatus.hasPaymentMethod;
   }
 
   async cancelSubscriptionAtPeriodEnd(userId: number, homeId: number): Promise<void> {

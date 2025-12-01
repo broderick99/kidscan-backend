@@ -18,7 +18,12 @@ async function runMigrations() {
   try {
     console.log('🚀 Running database migrations...');
     
-    const migrationsDir = path.join(__dirname, '..', 'src', 'database', 'migrations');
+    // Look for migrations in the source directory
+    const srcMigrationsDir = path.join(__dirname, '..', '..', 'src', 'database', 'migrations');
+    const distMigrationsDir = path.join(__dirname, '..', 'src', 'database', 'migrations');
+    
+    // Check if we're running from dist or src
+    const migrationsDir = fs.existsSync(srcMigrationsDir) ? srcMigrationsDir : distMigrationsDir;
     const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
 
     for (const file of files) {

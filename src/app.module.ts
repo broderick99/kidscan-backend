@@ -13,6 +13,7 @@ import { ReferralsModule } from './referrals/referrals.module';
 import { UploadModule } from './upload/upload.module';
 import { BillingModule } from './billing/billing.module';
 import { HealthModule } from './health/health.module';
+import { EmailModule } from './email/email.module';
 import { LoggingMiddleware } from './common/middleware/logging.middleware';
 
 @Module({
@@ -34,6 +35,7 @@ import { LoggingMiddleware } from './common/middleware/logging.middleware';
     UploadModule,
     BillingModule,
     HealthModule,
+    EmailModule,
   ],
 })
 export class AppModule implements NestModule {

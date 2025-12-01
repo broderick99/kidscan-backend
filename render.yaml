@@ -54,3 +54,11 @@ services:
         value: "5242880" # 5MB
       - key: ALLOWED_FILE_TYPES
         value: "image/jpeg,image/jpg,image/png,image/webp"
+      # Email Configuration - Add these in Render dashboard
+      - key: RESEND_API_KEY
+        sync: false # Add manually in Render dashboard
+      - key: EMAIL_FROM
+        value: hello@joinkidscan.com
+      # Frontend URL - Update after deploying frontend
+      - key: FRONTEND_URL
+        value: https://joinkidscan.com # Update with your actual domain
