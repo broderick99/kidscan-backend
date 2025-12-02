@@ -127,7 +127,7 @@ export class ServicesService {
     let query = `
       SELECT s.*,
              h.name as home_name, h.address_line1, h.city, h.state,
-             ut.email as teen_email, pt.first_name as teen_first_name, pt.last_name as teen_last_name,
+             ut.email as teen_email, pt.first_name as teen_first_name, pt.last_name as teen_last_name, pt.phone as teen_phone,
              uh.email as homeowner_email, ph.first_name as homeowner_first_name, ph.last_name as homeowner_last_name
       FROM services s
       LEFT JOIN homes h ON s.home_id = h.id
@@ -170,7 +170,7 @@ export class ServicesService {
       `SELECT s.*,
               h.name as home_name, h.address_line1, h.city, h.state, h.zip_code,
               h.special_instructions, h.homeowner_id,
-              ut.email as teen_email, pt.first_name as teen_first_name, pt.last_name as teen_last_name,
+              ut.email as teen_email, pt.first_name as teen_first_name, pt.last_name as teen_last_name, pt.phone as teen_phone,
               uh.email as homeowner_email, ph.first_name as homeowner_first_name, ph.last_name as homeowner_last_name
        FROM services s
        LEFT JOIN homes h ON s.home_id = h.id

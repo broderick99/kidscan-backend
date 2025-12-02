@@ -54,6 +54,7 @@ export class ProfilesService {
     const fieldMapping = {
       firstName: 'first_name',
       lastName: 'last_name',
+      phone: 'phone',
       dateOfBirth: 'date_of_birth',
       avatarUrl: 'avatar_url',
       addressLine1: 'address_line1',

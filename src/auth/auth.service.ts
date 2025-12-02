@@ -58,6 +58,7 @@ export class AuthService {
     role: string;
     firstName: string;
     lastName: string;
+    phone?: string;
     referredByTeenCode?: string;
   }) {
     // Hash password
@@ -108,9 +109,9 @@ export class AuthService {
 
       // Create profile
       await client.query(
-        `INSERT INTO profiles (user_id, first_name, last_name, teen_code, referred_by) 
-         VALUES ($1, $2, $3, $4, $5)`,
-        [user.id, data.firstName, data.lastName, teenCode, referredBy]
+        `INSERT INTO profiles (user_id, first_name, last_name, phone, teen_code, referred_by) 
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [user.id, data.firstName, data.lastName, data.phone, teenCode, referredBy]
       );
       
       return user;
@@ -283,6 +284,7 @@ export class AuthService {
         password: randomPassword,
         firstName: userData.firstName,
         lastName: userData.lastName,
+        phone: userData.phone,
         role: userData.role,
         referredByTeenCode: userData.referredByTeenCode,
       });

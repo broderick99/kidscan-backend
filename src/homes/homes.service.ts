@@ -173,7 +173,8 @@ export class HomesService {
       `SELECT s.*, 
               u.email as teen_email,
               p.first_name as teen_first_name,
-              p.last_name as teen_last_name
+              p.last_name as teen_last_name,
+              p.phone as teen_phone
        FROM services s
        LEFT JOIN users u ON s.teen_id = u.id
        LEFT JOIN profiles p ON u.id = p.user_id
