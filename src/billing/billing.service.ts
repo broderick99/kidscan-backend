@@ -485,7 +485,14 @@ export class BillingService {
 
       const home = result.rows[0];
       if (!home?.stripe_subscription_id) {
-        throw new BadRequestException('No subscription found for this home');
+        // Return empty usage data for homes without subscriptions
+        return {
+          usage: 0,
+          amount: 0,
+          period_start: Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60), // 30 days ago
+          period_end: Math.floor(Date.now() / 1000),
+          pricing: home?.price_per_task || 0
+        };
       }
 
       // Get the current subscription for billing period info
