@@ -329,27 +329,41 @@ export class BillingService {
   }
 
   private async getUsagePriceForPlan(planType: 'single_can' | 'double_can' | 'triple_can'): Promise<Stripe.Price> {
-    // Fetch pricing from Stripe products (configured in Stripe Dashboard)
-    const lookupKeys = {
-      single_can: 'kids_can_single_can_task_price',
-      double_can: 'kids_can_double_can_task_price', 
-      triple_can: 'kids_can_triple_can_task_price',
-    };
-
     try {
-      // Fetch price from Stripe using lookup key
-      const prices = await this.stripe.prices.list({
-        lookup_keys: [lookupKeys[planType]],
-        limit: 1,
-        active: true,
-      });
+      // Get all products and prices using the same logic as getPricingInfo
+      const { products, prices } = await this.getAllAvailableProducts();
 
-      if (prices.data.length > 0) {
-        return prices.data[0];
+      // Find the price for the specific plan type
+      for (const price of prices) {
+        if (price.type === 'recurring') {
+          const product = products.find(p => p.id === price.product);
+          if (product) {
+            const productName = product.name.toLowerCase();
+            let matchedPlanType: string | null = null;
+            
+            // Match products based on name patterns (same logic as getPricingInfo)
+            if (productName.includes('single') || productName.includes('one') || productName.includes('1')) {
+              matchedPlanType = 'single_can';
+            } else if (productName.includes('double') || productName.includes('two') || productName.includes('2')) {
+              matchedPlanType = 'double_can';
+            } else if (productName.includes('triple') || productName.includes('three') || productName.includes('3')) {
+              matchedPlanType = 'triple_can';
+            }
+
+            if (matchedPlanType === planType) {
+              console.log(`Found ${planType} price:`, {
+                priceId: price.id,
+                amount: price.unit_amount,
+                productName: product.name
+              });
+              return price;
+            }
+          }
+        }
       }
 
-      // If price doesn't exist, throw error (prices should be created in Stripe Dashboard)
-      throw new Error(`Price for plan type ${planType} not found in Stripe. Please create a price with lookup key: ${lookupKeys[planType]}`);
+      // If price doesn't exist, throw error
+      throw new Error(`Price for plan type ${planType} not found in Stripe products`);
     } catch (error) {
       console.error(`Error fetching ${planType} price from Stripe:`, error);
       throw new BadRequestException(`Pricing configuration error for ${planType}. Please contact support.`);
