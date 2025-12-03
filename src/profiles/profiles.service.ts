@@ -35,7 +35,11 @@ export class ProfilesService {
 
   async findByUserId(userId: number) {
     const result = await this.databaseService.query(
-      'SELECT * FROM profiles WHERE user_id = $1',
+      `SELECT p.*, 
+              referrer.teen_code as referrer_teen_code
+       FROM profiles p
+       LEFT JOIN profiles referrer ON p.referred_by = referrer.user_id
+       WHERE p.user_id = $1`,
       [userId]
     );
     
