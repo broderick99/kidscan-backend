@@ -165,6 +165,11 @@ export class AuthService {
     return {
       access_token: newAccessToken,
       refresh_token: newRefreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      },
     };
   }
 
@@ -191,7 +196,21 @@ export class AuthService {
 
   private getRefreshTokenExpiry(): Date {
     const expiry = new Date();
-    expiry.setDate(expiry.getDate() + 7); // 7 days
+    const expiresIn = this.configService.get('JWT_REFRESH_EXPIRES_IN', '30d');
+    const match = expiresIn.match(/^(\d+)([dhm])$/);
+    if (match) {
+      const value = parseInt(match[1], 10);
+      const unit = match[2];
+      if (unit === 'd') {
+        expiry.setDate(expiry.getDate() + value);
+      } else if (unit === 'h') {
+        expiry.setHours(expiry.getHours() + value);
+      } else if (unit === 'm') {
+        expiry.setMinutes(expiry.getMinutes() + value);
+      }
+    } else {
+      expiry.setDate(expiry.getDate() + 30); // Default 30 days
+    }
     return expiry;
   }
 
