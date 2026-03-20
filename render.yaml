@@ -12,6 +12,7 @@ services:
     region: oregon # same as database
     plan: starter # $7/month
     buildCommand: npm install && npm run build
+    preDeployCommand: npm run migrate
     startCommand: npm start
     healthCheckPath: /api/v1/health
     envVars:

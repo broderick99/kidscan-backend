@@ -132,10 +132,10 @@ export class PaymentsService {
 
       // If payment is completed, update earnings
       if (processPaymentDto.status === 'completed') {
-        // Get current period (current month)
-        const now = new Date();
-        const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        // Attribute earnings to the month the payment was created.
+        const paymentDate = payment.created_at ? new Date(payment.created_at) : new Date();
+        const periodStart = new Date(paymentDate.getFullYear(), paymentDate.getMonth(), 1);
+        const periodEnd = new Date(paymentDate.getFullYear(), paymentDate.getMonth() + 1, 0);
 
         // Update or insert earnings record
         await client.query(

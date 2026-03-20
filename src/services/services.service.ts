@@ -88,31 +88,27 @@ export class ServicesService {
         }
       }
       
-      await client.query('COMMIT');
-      
-      // Create Stripe subscription for homeowner after service creation
+      // Create Stripe subscription for homeowner before commit.
+      // If billing fails, rollback so services don't run without a valid subscription.
       if (userRole === 'homeowner') {
-        try {
-          // Determine plan type from service name or price
-          let planType: 'single_can' | 'double_can' | 'triple_can' = 'single_can';
-          if (service.name?.includes('Double')) {
-            planType = 'double_can';
-          } else if (service.name?.includes('Triple')) {
-            planType = 'triple_can';
-          }
-          
-          const subscriptionResult = await this.billingService.createUsageSubscription(
-            userId, 
-            createServiceDto.homeId, 
-            planType
-          );
-          
-          console.log(`✅ Created Stripe subscription ${subscriptionResult.subscriptionId} for service ${service.id}`);
-        } catch (error) {
-          console.error('⚠️ Failed to create Stripe subscription for service:', error);
-          // Don't fail service creation if billing fails - service still works, billing can be fixed later
+        // Determine plan type from service name or price
+        let planType: 'single_can' | 'double_can' | 'triple_can' = 'single_can';
+        if (service.name?.includes('Double')) {
+          planType = 'double_can';
+        } else if (service.name?.includes('Triple')) {
+          planType = 'triple_can';
         }
+
+        const subscriptionResult = await this.billingService.createUsageSubscription(
+          userId,
+          createServiceDto.homeId,
+          planType
+        );
+
+        console.log(`✅ Created Stripe subscription ${subscriptionResult.subscriptionId} for service ${service.id}`);
       }
+
+      await client.query('COMMIT');
       
       return service;
     } catch (error) {
@@ -344,10 +340,10 @@ export class ServicesService {
   async getStats(serviceId: number) {
     const result = await this.databaseService.query(
       `SELECT 
-         COUNT(*) FILTER (WHERE status = 'completed') as completed_tasks,
-         COUNT(*) FILTER (WHERE status = 'pending') as pending_tasks,
-         COUNT(*) FILTER (WHERE status = 'missed') as missed_tasks,
-         SUM(CASE WHEN status = 'completed' THEN price_per_task ELSE 0 END) as total_earned
+         COUNT(*) FILTER (WHERE t.status = 'completed') as completed_tasks,
+         COUNT(*) FILTER (WHERE t.status = 'pending') as pending_tasks,
+         COUNT(*) FILTER (WHERE t.status = 'missed') as missed_tasks,
+         SUM(CASE WHEN t.status = 'completed' THEN s.price_per_task ELSE 0 END) as total_earned
        FROM tasks t
        JOIN services s ON t.service_id = s.id
        WHERE t.service_id = $1`,

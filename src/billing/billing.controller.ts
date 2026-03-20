@@ -8,10 +8,13 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Headers,
+  Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BillingService } from './billing.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('billing')
 @Controller('billing')
@@ -19,6 +22,49 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @ApiBearerAuth()
 export class BillingController {
   constructor(private billingService: BillingService) {}
+
+  @Post('webhook')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Handle Stripe webhook events' })
+  @ApiResponse({ status: 200, description: 'Webhook processed' })
+  async handleWebhook(
+    @Headers('stripe-signature') signature: string,
+    @Req() req: any,
+  ) {
+    await this.billingService.handleStripeWebhook(signature, req.rawBody);
+    return { received: true };
+  }
+
+  @Get('connect/status')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get Stripe Connect payout onboarding status for teen' })
+  @ApiResponse({ status: 200, description: 'Connect status retrieved successfully' })
+  async getTeenConnectStatus(@Request() req) {
+    const userId = req.user?.userId || req.user?.id;
+    return this.billingService.getTeenConnectStatus(userId, req.user?.role);
+  }
+
+  @Post('connect/onboarding-link')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create Stripe Connect onboarding link for teen payouts' })
+  @ApiResponse({ status: 200, description: 'Onboarding link created successfully' })
+  async createTeenConnectOnboardingLink(
+    @Request() req,
+    @Body() body: { returnUrl?: string; refreshUrl?: string } = {},
+  ) {
+    const userId = req.user?.userId || req.user?.id;
+    return this.billingService.createTeenConnectOnboardingLink(userId, req.user?.role, body);
+  }
+
+  @Post('connect/dashboard-link')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create Stripe Express dashboard login link for teen payouts' })
+  @ApiResponse({ status: 200, description: 'Dashboard link created successfully' })
+  async createTeenConnectDashboardLink(@Request() req) {
+    const userId = req.user?.userId || req.user?.id;
+    return this.billingService.createTeenConnectDashboardLink(userId, req.user?.role);
+  }
 
   @Post('setup-intent')
   @HttpCode(HttpStatus.OK)
