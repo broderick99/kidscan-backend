@@ -285,3 +285,60 @@ ADD COLUMN IF NOT EXISTS stripe_connect_last_synced_at TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_profiles_stripe_connect_account_id
 ON profiles(stripe_connect_account_id)
 WHERE stripe_connect_account_id IS NOT NULL;
+
+-- Durable usage report ledger for Stripe metered billing
+CREATE TABLE IF NOT EXISTS billing_usage_reports (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+    payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+    service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    home_id INTEGER NOT NULL REFERENCES homes(id) ON DELETE CASCADE,
+    homeowner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    usage_value DECIMAL(10,2) NOT NULL,
+    occurred_at TIMESTAMP NOT NULL,
+    stripe_customer_id VARCHAR(255),
+    stripe_subscription_id VARCHAR(255),
+    stripe_meter_id VARCHAR(255),
+    stripe_event_identifier VARCHAR(255) NOT NULL UNIQUE,
+    stripe_event_name VARCHAR(255) NOT NULL DEFAULT 'can_completed',
+    stripe_value_key VARCHAR(255) NOT NULL DEFAULT 'value',
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    attempted_at TIMESTAMP,
+    reported_at TIMESTAMP,
+    next_retry_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_error TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_billing_usage_report_status
+      CHECK (status IN ('pending', 'processing', 'reported', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_usage_reports_status_retry
+ON billing_usage_reports(status, next_retry_at);
+
+CREATE INDEX IF NOT EXISTS idx_billing_usage_reports_home
+ON billing_usage_reports(home_id, occurred_at);
+
+CREATE INDEX IF NOT EXISTS idx_billing_usage_reports_payment
+ON billing_usage_reports(payment_id);
+
+-- Track invoice settlement separately from teen payout transfers
+ALTER TABLE payments
+ADD COLUMN IF NOT EXISTS stripe_invoice_id VARCHAR(255),
+ADD COLUMN IF NOT EXISTS invoice_settled_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS stripe_transfer_id VARCHAR(255) UNIQUE,
+ADD COLUMN IF NOT EXISTS stripe_transfer_group VARCHAR(255),
+ADD COLUMN IF NOT EXISTS stripe_source_transaction_id VARCHAR(255),
+ADD COLUMN IF NOT EXISTS transfer_attempt_count INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS transfer_attempted_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS transfer_next_retry_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN IF NOT EXISTS transfer_failure_reason TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_payments_payout_retry
+ON payments(type, status, transfer_next_retry_at)
+WHERE type = 'task_completion' AND stripe_transfer_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_payments_invoice_settlement
+ON payments(stripe_invoice_id, invoice_settled_at)
+WHERE stripe_invoice_id IS NOT NULL;

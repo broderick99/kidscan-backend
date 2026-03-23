@@ -244,26 +244,26 @@ export class TasksService {
       throw new BadRequestException('Task is not pending');
     }
 
-    const result = await this.databaseService.transaction(async (client) => {
-      let photoUrl: string | undefined = completeTaskDto.photoUrl;
+    let resolvedPhotoUrl: string | undefined = completeTaskDto.photoUrl;
 
-      // Handle photo upload if file is provided
-      if (photo) {
-        try {
-          // Upload photo to S3
-          const uploadResult = await this.uploadService.uploadTaskPhoto(photo, id);
-          photoUrl = uploadResult.url;
-          // Photo uploaded successfully
-        } catch (error) {
-          console.error('Failed to upload task photo:', error);
-          // Don't fail the entire task completion if photo upload fails
-          // Just log the error and continue without photo
-        }
-      } else {
-        // No photo provided
+    // A completion photo is the proof-of-work that makes the task billable.
+    if (!photo && !resolvedPhotoUrl) {
+      throw new BadRequestException('A completion photo is required to finish this task');
+    }
+
+    // Handle photo upload before mutating task/payment state so we never create
+    // a billable completion without proof attached.
+    if (photo) {
+      try {
+        const uploadResult = await this.uploadService.uploadTaskPhoto(photo, id);
+        resolvedPhotoUrl = uploadResult.url;
+      } catch (error) {
+        console.error('Failed to upload task photo:', error);
+        throw new BadRequestException('Failed to upload completion photo');
       }
+    }
 
-      // Update task
+    const result = await this.databaseService.transaction(async (client) => {
       const taskResult = await client.query(
         `UPDATE tasks 
          SET status = 'completed', 
@@ -272,38 +272,74 @@ export class TasksService {
              notes = $2
          WHERE id = $3
          RETURNING *`,
-        [photoUrl, completeTaskDto.notes, id]
+        [resolvedPhotoUrl, completeTaskDto.notes, id]
       );
 
-      // Create payment record using the task's stored price_per_task
       const taskDetails = taskResult.rows[0];
-      await client.query(
+      const paymentResult = await client.query(
         `INSERT INTO payments (teen_id, amount, type, status, description, reference_id, reference_type)
-         VALUES ($1, $2, 'task_completion', 'pending', $3, $4, 'task')`,
+         VALUES ($1, $2, 'task_completion', 'pending', $3, $4, 'task')
+         RETURNING id`,
         [
           teenId,
-          taskDetails.price_per_task, // Use the stored price from the updated task
+          taskDetails.price_per_task,
           `Task completion: ${task.service_name}`,
           id,
         ]
       );
 
-      return taskResult.rows[0];
+      const paymentId = paymentResult.rows[0]?.id;
+      await client.query(
+        `INSERT INTO billing_usage_reports (
+           task_id,
+           payment_id,
+           service_id,
+           home_id,
+           homeowner_id,
+           usage_value,
+           occurred_at,
+           stripe_event_identifier
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (task_id)
+         DO UPDATE SET
+           payment_id = EXCLUDED.payment_id,
+           service_id = EXCLUDED.service_id,
+           home_id = EXCLUDED.home_id,
+           homeowner_id = EXCLUDED.homeowner_id,
+           usage_value = EXCLUDED.usage_value,
+           occurred_at = EXCLUDED.occurred_at,
+           status = 'pending',
+           next_retry_at = CURRENT_TIMESTAMP,
+           last_error = NULL,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          id,
+          paymentId,
+          task.service_id,
+          task.home_id,
+          task.homeowner_id,
+          taskDetails.price_per_task,
+          taskDetails.completed_at,
+          `task_${id}`,
+        ]
+      );
+
+      return {
+        task: taskDetails,
+        paymentId,
+      };
     });
 
-    // Report usage to Stripe after successful task completion
+    // Report usage to Stripe after successful task completion. If Stripe is
+    // unavailable, the queued usage row remains available for automatic retry.
     try {
-      await this.billingService.reportTaskUsage(
-        task.service_id,
-        result.id,
-        result.price_per_task
-      );
+      await this.billingService.processQueuedTaskUsage(id);
     } catch (error) {
       console.error('Failed to report task usage to Stripe:', error);
-      // Don't fail task completion if usage reporting fails
     }
 
-    return result;
+    return result.task;
   }
 
   async cancel(id: number, userId: number, userRole: string) {

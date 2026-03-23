@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { BillingService } from '../billing/billing.service';
 
 @Injectable()
 export class AdminService {
-  constructor(private databaseService: DatabaseService) {}
+  constructor(
+    private databaseService: DatabaseService,
+    private billingService: BillingService,
+  ) {}
 
   async getAdminStats() {
     const client = await this.databaseService.getClient();
@@ -291,5 +295,231 @@ export class AdminService {
       recentTasks: recentTasksResult.rows,
       recentServices: recentServicesResult.rows
     };
+  }
+
+  async getPayoutOperations() {
+    const [summaryResult, teenQueuesResult, failedUsageResult, pendingPaymentsResult] = await Promise.all([
+      this.databaseService.query(`
+        SELECT
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NULL
+          ) as awaiting_invoice_payment_count,
+          COALESCE(SUM(p.amount) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NULL
+          ), 0) as awaiting_invoice_payment_amount,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND p.stripe_transfer_id IS NULL
+              AND bur.status = 'reported'
+              AND teen_profile.stripe_connect_account_id IS NOT NULL
+              AND COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) = TRUE
+              AND COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) = TRUE
+          ) as ready_payment_count,
+          COALESCE(SUM(p.amount) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND p.stripe_transfer_id IS NULL
+              AND bur.status = 'reported'
+              AND teen_profile.stripe_connect_account_id IS NOT NULL
+              AND COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) = TRUE
+              AND COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) = TRUE
+          ), 0) as ready_payment_amount,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND (
+                teen_profile.stripe_connect_account_id IS NULL
+                OR COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) = FALSE
+                OR COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) = FALSE
+              )
+          ) as blocked_payment_count,
+          COALESCE(SUM(p.amount) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND (
+                teen_profile.stripe_connect_account_id IS NULL
+                OR COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) = FALSE
+                OR COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) = FALSE
+              )
+          ), 0) as blocked_payment_amount,
+          COUNT(*) FILTER (WHERE bur.status = 'failed') as failed_usage_count,
+          COALESCE(SUM(bur.usage_value) FILTER (WHERE bur.status = 'failed'), 0) as failed_usage_amount,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND p.stripe_transfer_id IS NULL
+              AND p.transfer_failure_reason IS NOT NULL
+          ) as failed_transfer_count,
+          COALESCE(SUM(p.amount) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND p.stripe_transfer_id IS NULL
+              AND p.transfer_failure_reason IS NOT NULL
+          ), 0) as failed_transfer_amount,
+          COUNT(*) FILTER (WHERE p.status = 'completed' AND p.stripe_transfer_id IS NOT NULL) as transferred_payment_count,
+          COALESCE(SUM(p.amount) FILTER (
+            WHERE p.status = 'completed' AND p.stripe_transfer_id IS NOT NULL
+          ), 0) as transferred_payment_amount,
+          COUNT(DISTINCT p.teen_id) FILTER (WHERE p.status = 'pending') as teens_with_pending_earnings,
+          COUNT(DISTINCT p.teen_id) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND (
+                teen_profile.stripe_connect_account_id IS NULL
+                OR COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) = FALSE
+                OR COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) = FALSE
+              )
+          ) as teens_not_payout_ready
+        FROM payments p
+        JOIN tasks t ON p.reference_type = 'task' AND p.reference_id = t.id
+        JOIN services s ON t.service_id = s.id
+        LEFT JOIN billing_usage_reports bur ON bur.task_id = t.id
+        LEFT JOIN profiles teen_profile ON teen_profile.user_id = p.teen_id
+        WHERE p.type = 'task_completion'
+      `),
+      this.databaseService.query(`
+        SELECT
+          p.teen_id,
+          teen.email as teen_email,
+          teen_profile.first_name as teen_first_name,
+          teen_profile.last_name as teen_last_name,
+          teen_profile.teen_code,
+          teen_profile.stripe_connect_account_id,
+          COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) as payouts_enabled,
+          COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) as onboarding_completed,
+          COUNT(*) FILTER (WHERE p.status = 'pending') as pending_payments,
+          COALESCE(SUM(p.amount) FILTER (WHERE p.status = 'pending'), 0) as pending_amount,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NULL
+          ) as awaiting_invoice_payments,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+          ) as invoice_settled_payments,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND bur.status = 'reported'
+              AND teen_profile.stripe_connect_account_id IS NOT NULL
+              AND COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) = TRUE
+              AND COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) = TRUE
+          ) as ready_payments,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND (
+                teen_profile.stripe_connect_account_id IS NULL
+                OR COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) = FALSE
+                OR COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) = FALSE
+              )
+          ) as blocked_payout_payments,
+          COUNT(*) FILTER (WHERE p.status = 'pending' AND bur.status = 'failed') as failed_usage_reports,
+          COUNT(*) FILTER (
+            WHERE p.status = 'pending'
+              AND p.invoice_settled_at IS NOT NULL
+              AND p.transfer_failure_reason IS NOT NULL
+          ) as failed_transfer_payments
+        FROM payments p
+        JOIN users teen ON teen.id = p.teen_id
+        LEFT JOIN profiles teen_profile ON teen_profile.user_id = teen.id
+        LEFT JOIN billing_usage_reports bur ON bur.payment_id = p.id
+        WHERE p.type = 'task_completion'
+        GROUP BY
+          p.teen_id,
+          teen.email,
+          teen_profile.first_name,
+          teen_profile.last_name,
+          teen_profile.teen_code,
+          teen_profile.stripe_connect_account_id,
+          teen_profile.stripe_connect_payouts_enabled,
+          teen_profile.stripe_connect_onboarding_completed
+        HAVING COUNT(*) FILTER (WHERE p.status = 'pending') > 0
+        ORDER BY pending_amount DESC, pending_payments DESC
+        LIMIT 25
+      `),
+      this.databaseService.query(`
+        SELECT
+          bur.task_id,
+          bur.payment_id,
+          bur.usage_value,
+          bur.occurred_at,
+          bur.retry_count,
+          bur.attempted_at,
+          bur.next_retry_at,
+          bur.last_error,
+          teen_profile.first_name as teen_first_name,
+          teen_profile.last_name as teen_last_name,
+          teen_profile.teen_code,
+          homeowner_profile.first_name as homeowner_first_name,
+          homeowner_profile.last_name as homeowner_last_name,
+          h.name as home_name,
+          s.name as service_name
+        FROM billing_usage_reports bur
+        JOIN services s ON bur.service_id = s.id
+        JOIN homes h ON bur.home_id = h.id
+        JOIN profiles teen_profile ON s.teen_id = teen_profile.user_id
+        JOIN profiles homeowner_profile ON h.homeowner_id = homeowner_profile.user_id
+        WHERE bur.status = 'failed'
+        ORDER BY bur.updated_at DESC
+        LIMIT 25
+      `),
+      this.databaseService.query(`
+        SELECT
+          p.id,
+          p.amount,
+          p.status as payment_status,
+          p.created_at,
+          p.invoice_settled_at,
+          p.stripe_invoice_id,
+          p.stripe_transfer_id,
+          p.transfer_attempt_count,
+          p.transfer_attempted_at,
+          p.transfer_next_retry_at,
+          p.transfer_failure_reason,
+          t.id as task_id,
+          t.completed_at,
+          bur.status as usage_status,
+          bur.reported_at,
+          bur.last_error,
+          teen_profile.first_name as teen_first_name,
+          teen_profile.last_name as teen_last_name,
+          teen_profile.teen_code,
+          COALESCE(teen_profile.stripe_connect_onboarding_completed, FALSE) as onboarding_completed,
+          COALESCE(teen_profile.stripe_connect_payouts_enabled, FALSE) as payouts_enabled,
+          h.name as home_name,
+          s.name as service_name
+        FROM payments p
+        JOIN tasks t ON p.reference_type = 'task' AND p.reference_id = t.id
+        JOIN services s ON t.service_id = s.id
+        JOIN homes h ON s.home_id = h.id
+        JOIN profiles teen_profile ON p.teen_id = teen_profile.user_id
+        LEFT JOIN billing_usage_reports bur ON bur.payment_id = p.id
+        WHERE p.type = 'task_completion'
+          AND p.status = 'pending'
+        ORDER BY t.completed_at DESC NULLS LAST, p.created_at DESC
+        LIMIT 50
+      `),
+    ]);
+
+    return {
+      summary: summaryResult.rows[0],
+      teenQueues: teenQueuesResult.rows,
+      failedUsageReports: failedUsageResult.rows,
+      pendingPayments: pendingPaymentsResult.rows,
+    };
+  }
+
+  async retryUsageReports(limit = 50) {
+    const processed = await this.billingService.retryPendingUsageReports(limit);
+    return { processed };
+  }
+
+  async retryPayoutTransfers(limit = 50) {
+    const processed = await this.billingService.retryPendingPayoutTransfers(limit);
+    return { processed };
   }
 }

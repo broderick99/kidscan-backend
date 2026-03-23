@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -52,5 +52,26 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Returns recent activity' })
   getRecentActivity() {
     return this.adminService.getRecentActivity();
+  }
+
+  @Get('payouts')
+  @Roles('admin')
+  @ApiResponse({ status: 200, description: 'Returns payout operations overview' })
+  getPayoutOperations() {
+    return this.adminService.getPayoutOperations();
+  }
+
+  @Post('payouts/retry-usage')
+  @Roles('admin')
+  @ApiResponse({ status: 200, description: 'Retries queued Stripe usage reports' })
+  retryUsageReports(@Body('limit') limit?: number) {
+    return this.adminService.retryUsageReports(limit);
+  }
+
+  @Post('payouts/retry-transfers')
+  @Roles('admin')
+  @ApiResponse({ status: 200, description: 'Retries pending Stripe payout transfers' })
+  retryPayoutTransfers(@Body('limit') limit?: number) {
+    return this.adminService.retryPayoutTransfers(limit);
   }
 }
