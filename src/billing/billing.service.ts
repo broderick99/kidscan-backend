@@ -197,8 +197,25 @@ export class BillingService {
 
     const user = result.rows[0];
     if (user?.stripe_customer_id) {
-      // Return existing customer
-      return await this.stripe.customers.retrieve(user.stripe_customer_id) as Stripe.Customer;
+      try {
+        const existingCustomer = await this.stripe.customers.retrieve(user.stripe_customer_id);
+        if (!('deleted' in existingCustomer) || !existingCustomer.deleted) {
+          return existingCustomer as Stripe.Customer;
+        }
+
+        console.warn(`Stripe customer ${user.stripe_customer_id} for user ${userId} is deleted. Recreating customer.`);
+      } catch (error) {
+        if (!this.isMissingStripeCustomerError(error)) {
+          throw error;
+        }
+
+        console.warn(`Stripe customer ${user.stripe_customer_id} for user ${userId} was not found. Recreating customer.`);
+      }
+
+      await this.databaseService.query(
+        'UPDATE users SET stripe_customer_id = NULL WHERE id = $1',
+        [userId]
+      );
     }
 
     // Get user details for creating customer
@@ -243,6 +260,24 @@ export class BillingService {
     );
 
     return customer;
+  }
+
+  private isMissingStripeCustomerError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const stripeError = error as {
+      code?: string;
+      message?: string;
+      raw?: { code?: string };
+      statusCode?: number;
+    };
+
+    return stripeError.statusCode === 404
+      || stripeError.code === 'resource_missing'
+      || stripeError.raw?.code === 'resource_missing'
+      || stripeError.message?.includes('No such customer:') === true;
   }
 
   async getBillingStatus(userId: number): Promise<BillingStatus> {
