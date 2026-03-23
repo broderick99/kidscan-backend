@@ -21,9 +21,8 @@
     "verify:api-bootstrap": "bash ./scripts/verify-api-bootstrap.sh",
     "verify:api-flow": "bash ./scripts/verify-api-flow.sh",
     "verify:api-post-billing": "bash ./scripts/verify-api-post-billing.sh",
-    "db:migrate": "node dist/src/scripts/migrate.js",
-    "db:seed": "node dist/src/scripts/seed.js",
-    "db:reset": "node dist/src/scripts/reset-db.js",
+    "db:migrate": "node dist/scripts/migrate.js",
+    "db:reset": "node dist/scripts/reset-db.js",
     "migrate": "npm run build && npm run db:migrate"
   },
   "dependencies": {

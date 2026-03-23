@@ -3,7 +3,7 @@ databases:
     databaseName: kidscan
     user: kidscan_user
     region: oregon # or your preferred region
-    plan: starter # 1GB storage, $7/month
+    plan: basic_1gb # current lowest paid Postgres tier for new databases
 
 services:
   - type: web
@@ -11,9 +11,8 @@ services:
     runtime: node
     region: oregon # same as database
     plan: starter # $7/month
-    buildCommand: npm install && npm run build
-    preDeployCommand: npm run migrate
-    startCommand: npm start
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run db:migrate && npm start
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_ENV
