@@ -200,7 +200,7 @@ export class ServicesService {
   }
 
   async findByTeen(teenId: number) {
-    return this.findAll({ teenId });
+    return this.findAll({ teenId, status: 'active' });
   }
 
   async findByHomeowner(homeownerId: number) {
@@ -252,18 +252,43 @@ export class ServicesService {
       return this.findOne(id);
     }
 
-    values.push(id);
-    const result = await this.databaseService.query(
-      `UPDATE services 
-       SET ${fields.join(', ')}
-       WHERE id = $${paramCount}
-       RETURNING *`,
-      values
-    );
+    const updatedService = await this.databaseService.transaction(async (client) => {
+      const updateFields = [...fields, 'updated_at = CURRENT_TIMESTAMP'];
 
-    if (!result.rows[0]) {
-      throw new NotFoundException('Service not found');
-    }
+      if (
+        updateServiceDto.status === 'cancelled'
+        && updateServiceDto.endDate === undefined
+        && !updateFields.some((field) => field.startsWith('end_date'))
+      ) {
+        updateFields.push('end_date = CURRENT_DATE');
+      }
+
+      values.push(id);
+      const result = await client.query(
+        `UPDATE services 
+         SET ${updateFields.join(', ')}
+         WHERE id = $${paramCount}
+         RETURNING *`,
+        values
+      );
+
+      if (!result.rows[0]) {
+        throw new NotFoundException('Service not found');
+      }
+
+      if (updateServiceDto.status === 'cancelled') {
+        await client.query(
+          `UPDATE tasks
+           SET status = 'cancelled',
+               updated_at = CURRENT_TIMESTAMP
+           WHERE service_id = $1
+             AND status = 'pending'`,
+          [id]
+        );
+      }
+
+      return result.rows[0];
+    });
 
     // If service is being cancelled, also cancel the Stripe subscription at period end
     if (updateServiceDto.status === 'cancelled') {
@@ -277,7 +302,7 @@ export class ServicesService {
       }
     }
 
-    return result.rows[0];
+    return updatedService;
   }
 
   async remove(id: number, userId: number, userRole: string) {
@@ -318,8 +343,11 @@ export class ServicesService {
 
   async getUpcomingTasks(serviceId: number, limit = 10) {
     const result = await this.databaseService.query(
-      `SELECT * FROM tasks 
-       WHERE service_id = $1 AND status = 'pending' 
+      `SELECT t.* FROM tasks t
+       JOIN services s ON s.id = t.service_id
+       WHERE t.service_id = $1
+         AND t.status = 'pending'
+         AND s.status = 'active'
        ORDER BY scheduled_date ASC 
        LIMIT $2`,
       [serviceId, limit]

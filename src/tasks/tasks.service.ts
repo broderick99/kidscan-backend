@@ -169,6 +169,7 @@ export class TasksService {
        JOIN services s ON t.service_id = s.id
        JOIN homes h ON s.home_id = h.id
        WHERE s.teen_id = $1 
+         AND s.status = 'active'
          AND t.status = 'pending'
          AND t.scheduled_date >= CURRENT_DATE
          AND t.scheduled_date <= CURRENT_DATE + INTERVAL '${days} days'
