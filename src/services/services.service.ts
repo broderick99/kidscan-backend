@@ -4,6 +4,7 @@ import { BillingService } from '../billing/billing.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { ChangePlanDto } from './dto/change-plan.dto';
+import { formatDateOnlyUtc, generateMonthlyServiceTasks, getMonthBoundsUtc } from './service-schedule.util';
 
 @Injectable()
 export class ServicesService {
@@ -431,8 +432,7 @@ export class ServicesService {
         
         // Delete all pending tasks for the current month to regenerate them based on new schedule
         const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const { startOfMonth, endOfMonth } = getMonthBoundsUtc(now);
         console.log('📅 Now:', now.toISOString());
         console.log('📅 Start of month for deletion:', startOfMonth.toISOString());
         console.log('📅 End of month for deletion:', endOfMonth.toISOString());
@@ -444,7 +444,7 @@ export class ServicesService {
            AND scheduled_date >= $2 
            AND scheduled_date <= $3
            RETURNING *`,
-          [id, startOfMonth.toISOString().split('T')[0], endOfMonth.toISOString().split('T')[0]]
+          [id, formatDateOnlyUtc(startOfMonth), formatDateOnlyUtc(endOfMonth)]
         );
         console.log('🗑️ Deleted future pending tasks:', deleteResult.rows);
         console.log('🔢 Number of tasks deleted:', deleteResult.rowCount);
@@ -457,51 +457,21 @@ export class ServicesService {
         console.log('📋 Remaining tasks after deletion:', remainingTasksResult.rows);
         
         // Generate new tasks based on new pickup schedule for the current month
-        const tasksToInsert = [];
+        const tasksToInsert = generateMonthlyServiceTasks(
+          changePlanDto.pickupDays.map((pickupDay) => ({
+            dayOfWeek: pickupDay.dayOfWeek,
+            canNumber: pickupDay.canNumber,
+          })),
+          now,
+        ).map((task) => ({
+          ...task,
+          serviceId: id,
+        }));
         
         console.log('📅 Date range for task generation:');
         console.log('  Now:', now.toISOString());
         console.log('  Start of month:', startOfMonth.toISOString());
         console.log('  End of month:', endOfMonth.toISOString());
-        
-        for (const pickupDay of changePlanDto.pickupDays) {
-          console.log('🔄 Processing pickup day:', pickupDay);
-          const dayOfWeek = this.getDayOfWeekNumber(pickupDay.dayOfWeek);
-          console.log('📅 Day of week number:', dayOfWeek, 'for', pickupDay.dayOfWeek);
-          
-          // Find the first occurrence of this day of week in the current month
-          let currentDate = new Date(startOfMonth);
-          const currentDayOfWeek = currentDate.getDay();
-          console.log('📅 Start of month day of week:', currentDayOfWeek, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][currentDayOfWeek]);
-          console.log('📅 Target day of week:', dayOfWeek, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayOfWeek]);
-          
-          // Find first occurrence of target day in the month
-          while (currentDate.getDay() !== dayOfWeek && currentDate <= endOfMonth) {
-            currentDate.setDate(currentDate.getDate() + 1);
-          }
-          
-          if (currentDate <= endOfMonth) {
-            console.log('📅 First pickup date in month:', currentDate.toISOString(), currentDate.toDateString());
-            
-            // Service happens the evening before pickup day
-            let serviceDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() - 1);
-            console.log('📅 First service date (day before pickup):', serviceDate.toISOString(), serviceDate.toDateString());
-            
-            // Generate weekly tasks for this pickup day throughout the month
-            while (serviceDate <= endOfMonth) {
-              const scheduledDateStr = serviceDate.toISOString().split('T')[0];
-              console.log('📅 Service date:', scheduledDateStr, serviceDate.toDateString());
-              tasksToInsert.push({
-                serviceId: id,
-                scheduledDate: scheduledDateStr,
-                canNumber: pickupDay.canNumber
-              });
-              
-              // Move to next week - create new date to avoid mutation issues
-              serviceDate = new Date(serviceDate.getFullYear(), serviceDate.getMonth(), serviceDate.getDate() + 7);
-            }
-          }
-        }
         
         console.log('📋 Tasks to insert:', JSON.stringify(tasksToInsert, null, 2));
         console.log('🔢 Total tasks to insert:', tasksToInsert.length);
@@ -562,16 +532,4 @@ export class ServicesService {
     }
   }
 
-  private getDayOfWeekNumber(dayOfWeek: string): number {
-    const days = {
-      'sunday': 0,
-      'monday': 1,
-      'tuesday': 2,
-      'wednesday': 3,
-      'thursday': 4,
-      'friday': 5,
-      'saturday': 6
-    };
-    return days[dayOfWeek.toLowerCase()] ?? 0;
-  }
 }

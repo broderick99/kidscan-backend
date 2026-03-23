@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { ServicesService } from '../services/services.service';
+import { formatDateOnlyUtc, parseDateOnlyUtc } from '../services/service-schedule.util';
 import { UploadService } from '../upload/upload.service';
 import { BillingService } from '../billing/billing.service';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -372,9 +373,9 @@ export class TasksService {
       [serviceId]
     );
 
-    let startDate = new Date(service.start_date);
+    let startDate = parseDateOnlyUtc(service.start_date);
     if (lastTaskResult.rows[0]) {
-      startDate = new Date(lastTaskResult.rows[0].scheduled_date);
+      startDate = parseDateOnlyUtc(lastTaskResult.rows[0].scheduled_date);
     }
 
     const tasks = [];
@@ -397,7 +398,7 @@ export class TasksService {
       if (currentDate <= endDate) {
         tasks.push({
           serviceId,
-          scheduledDate: currentDate.toISOString().split('T')[0],
+          scheduledDate: formatDateOnlyUtc(currentDate),
         });
       }
     }
