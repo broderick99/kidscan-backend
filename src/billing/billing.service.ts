@@ -12,8 +12,11 @@ import { DatabaseService } from '../database/database.service';
 
 export interface PaymentMethodInfo {
   id: string;
-  type: 'us_bank_account';
+  type: 'card' | 'us_bank_account';
   last4: string;
+  brand?: string | null;
+  expMonth?: number | null;
+  expYear?: number | null;
   bankName?: string | null;
   accountHolderType?: string | null;
   accountType?: string | null;
@@ -186,7 +189,7 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
       const customer = await this.getOrCreateCustomer(userId);
       const setupIntent = await this.stripe.setupIntents.create({
         customer: customer.id,
-        payment_method_types: ['us_bank_account'],
+        payment_method_types: ['card', 'us_bank_account'],
         payment_method_options: {
           us_bank_account: {
             financial_connections: {
@@ -226,7 +229,7 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
       const session = await this.stripe.checkout.sessions.create({
         mode: 'setup',
         customer: customer.id,
-        payment_method_types: ['us_bank_account'],
+        payment_method_types: ['card', 'us_bank_account'],
         payment_method_options: {
           us_bank_account: {
             financial_connections: {
@@ -388,7 +391,7 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
 
       const customerId = user.stripe_customer_id;
 
-      const paymentMethods = await this.listCustomerAchPaymentMethods(customerId);
+      const paymentMethod = await this.getOrSetDefaultBillingPaymentMethod(customerId);
 
       // Get active subscriptions
       const subscriptions = await this.stripe.subscriptions.list({
@@ -397,21 +400,16 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
         limit: 1,
       });
 
-      const hasPaymentMethod = paymentMethods.data.length > 0;
+      const hasPaymentMethod = !!paymentMethod;
       const activeSubscription = subscriptions.data.find(sub => 
         ['active', 'past_due', 'incomplete'].includes(sub.status)
       );
-
-      let paymentMethod: PaymentMethodInfo | undefined;
-      if (hasPaymentMethod) {
-        paymentMethod = this.mapAchPaymentMethodInfo(paymentMethods.data[0]);
-      }
 
       return {
         hasPaymentMethod,
         subscriptionStatus: activeSubscription?.status as any || null,
         stripeCustomerId: customerId,
-        paymentMethod,
+        paymentMethod: paymentMethod ? this.mapBillingPaymentMethodInfo(paymentMethod) : undefined,
       };
     } catch (error) {
       console.error('Error getting billing status:', error);
@@ -661,7 +659,7 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
               default_payment_method: defaultPaymentMethodId,
               collection_method: 'charge_automatically',
               payment_settings: {
-                payment_method_types: ['us_bank_account'],
+                payment_method_types: ['card', 'us_bank_account'],
                 save_default_payment_method: 'on_subscription',
               },
             });
@@ -699,7 +697,7 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
         default_payment_method: defaultPaymentMethodId,
         payment_behavior: 'allow_incomplete',
         payment_settings: {
-          payment_method_types: ['us_bank_account'],
+          payment_method_types: ['card', 'us_bank_account'],
           save_default_payment_method: 'on_subscription',
         },
         collection_method: 'charge_automatically',
@@ -1706,34 +1704,58 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
     return [];
   }
 
-  private async listCustomerAchPaymentMethods(customerId: string, limit = 10) {
+  private async listCustomerBillingPaymentMethods(
+    customerId: string,
+    type: 'card' | 'us_bank_account',
+    limit = 10,
+  ) {
     return this.stripe.paymentMethods.list({
       customer: customerId,
-      type: 'us_bank_account',
+      type,
       limit,
     });
+  }
+
+  private isCardPaymentMethod(paymentMethod: Stripe.PaymentMethod | null | undefined): boolean {
+    return !!paymentMethod && paymentMethod.type === 'card' && !!paymentMethod.card;
   }
 
   private isUsBankAccountPaymentMethod(paymentMethod: Stripe.PaymentMethod | null | undefined): boolean {
     return !!paymentMethod && paymentMethod.type === 'us_bank_account' && !!paymentMethod.us_bank_account;
   }
 
-  private mapAchPaymentMethodInfo(paymentMethod: Stripe.PaymentMethod): PaymentMethodInfo | undefined {
-    if (!this.isUsBankAccountPaymentMethod(paymentMethod)) {
-      return undefined;
+  private isSupportedBillingPaymentMethod(paymentMethod: Stripe.PaymentMethod | null | undefined): boolean {
+    return this.isCardPaymentMethod(paymentMethod) || this.isUsBankAccountPaymentMethod(paymentMethod);
+  }
+
+  private mapBillingPaymentMethodInfo(paymentMethod: Stripe.PaymentMethod): PaymentMethodInfo | undefined {
+    if (this.isCardPaymentMethod(paymentMethod)) {
+      const card = paymentMethod.card!;
+      return {
+        id: paymentMethod.id,
+        type: 'card',
+        last4: card.last4 || '----',
+        brand: card.brand || null,
+        expMonth: card.exp_month || null,
+        expYear: card.exp_year || null,
+      };
     }
 
-    const bankAccount = paymentMethod.us_bank_account!;
-    return {
-      id: paymentMethod.id,
-      type: 'us_bank_account',
-      last4: bankAccount.last4 || '----',
-      bankName: bankAccount.bank_name || null,
-      accountHolderType: bankAccount.account_holder_type || null,
-      accountType: bankAccount.account_type || null,
-      routingNumberLast4: bankAccount.routing_number?.slice(-4) || null,
-      verificationStatus: bankAccount.status_details?.blocked ? 'blocked' : null,
-    };
+    if (this.isUsBankAccountPaymentMethod(paymentMethod)) {
+      const bankAccount = paymentMethod.us_bank_account!;
+      return {
+        id: paymentMethod.id,
+        type: 'us_bank_account',
+        last4: bankAccount.last4 || '----',
+        bankName: bankAccount.bank_name || null,
+        accountHolderType: bankAccount.account_holder_type || null,
+        accountType: bankAccount.account_type || null,
+        routingNumberLast4: bankAccount.routing_number?.slice(-4) || null,
+        verificationStatus: bankAccount.status_details?.blocked ? 'blocked' : null,
+      };
+    }
+
+    return undefined;
   }
 
   private getMissingTeenPayoutProfileFields(profile: {
@@ -1960,7 +1982,7 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async getOrSetDefaultPaymentMethod(customerId: string): Promise<string | null> {
+  private async getOrSetDefaultBillingPaymentMethod(customerId: string): Promise<Stripe.PaymentMethod | null> {
     const customerResponse = await this.stripe.customers.retrieve(customerId);
     if ('deleted' in customerResponse && customerResponse.deleted) {
       return null;
@@ -1974,8 +1996,8 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
     if (existingDefaultId) {
       try {
         const existingPaymentMethod = await this.stripe.paymentMethods.retrieve(existingDefaultId);
-        if (this.isUsBankAccountPaymentMethod(existingPaymentMethod)) {
-          return existingDefaultId;
+        if (this.isSupportedBillingPaymentMethod(existingPaymentMethod)) {
+          return existingPaymentMethod;
         }
       } catch (error: any) {
         if (error?.code !== 'resource_missing') {
@@ -1984,21 +2006,31 @@ export class BillingService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const paymentMethods = await this.listCustomerAchPaymentMethods(customerId, 1);
+    const [bankPaymentMethods, cardPaymentMethods] = await Promise.all([
+      this.listCustomerBillingPaymentMethods(customerId, 'us_bank_account', 5),
+      this.listCustomerBillingPaymentMethods(customerId, 'card', 5),
+    ]);
 
-    if (paymentMethods.data.length === 0) {
+    const fallbackPaymentMethod = [...bankPaymentMethods.data, ...cardPaymentMethods.data]
+      .filter((paymentMethod) => this.isSupportedBillingPaymentMethod(paymentMethod))
+      .sort((left, right) => (right.created || 0) - (left.created || 0))[0];
+
+    if (!fallbackPaymentMethod) {
       return null;
     }
 
-    const fallbackPaymentMethodId = paymentMethods.data[0].id;
-
     await this.stripe.customers.update(customerId, {
       invoice_settings: {
-        default_payment_method: fallbackPaymentMethodId,
+        default_payment_method: fallbackPaymentMethod.id,
       },
     });
 
-    return fallbackPaymentMethodId;
+    return fallbackPaymentMethod;
+  }
+
+  private async getOrSetDefaultPaymentMethod(customerId: string): Promise<string | null> {
+    const paymentMethod = await this.getOrSetDefaultBillingPaymentMethod(customerId);
+    return paymentMethod?.id || null;
   }
 
   private extractInvoicePeriod(invoice: Stripe.Invoice): { start: number; end: number } {

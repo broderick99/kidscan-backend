@@ -464,7 +464,7 @@ describe('BillingService', () => {
     expect(mockPaymentIntentsRetrieve).toHaveBeenCalledWith('pi_123');
   });
 
-  it('creates ACH-only checkout setup sessions for homeowners', async () => {
+  it('creates checkout setup sessions that offer card and ACH for homeowners', async () => {
     const databaseService = {
       query: jest.fn(),
       transaction: jest.fn(),
@@ -493,7 +493,7 @@ describe('BillingService', () => {
       expect.objectContaining({
         mode: 'setup',
         customer: 'cus_123',
-        payment_method_types: ['us_bank_account'],
+        payment_method_types: ['card', 'us_bank_account'],
         payment_method_options: {
           us_bank_account: {
             financial_connections: {
@@ -505,7 +505,7 @@ describe('BillingService', () => {
     );
   });
 
-  it('reports ACH billing status from saved bank accounts only', async () => {
+  it('reports billing status from a saved bank account when no default payment method is set', async () => {
     const databaseService = {
       query: jest.fn().mockResolvedValue({
         rows: [{ stripe_customer_id: 'cus_123' }],
@@ -513,22 +513,31 @@ describe('BillingService', () => {
       transaction: jest.fn(),
     } as any;
 
-    mockPaymentMethodsList.mockResolvedValue({
-      data: [
-        {
-          id: 'pm_ach_123',
-          type: 'us_bank_account',
-          us_bank_account: {
-            last4: '6789',
-            bank_name: 'First Hawaiian Bank',
-            account_holder_type: 'individual',
-            account_type: 'checking',
-            routing_number: '110000000',
-            status_details: null,
-          },
-        },
-      ],
+    mockCustomersRetrieve.mockResolvedValue({
+      id: 'cus_123',
+      invoice_settings: {},
     });
+    mockPaymentMethodsList
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 'pm_ach_123',
+            type: 'us_bank_account',
+            created: 100,
+            us_bank_account: {
+              last4: '6789',
+              bank_name: 'First Hawaiian Bank',
+              account_holder_type: 'individual',
+              account_type: 'checking',
+              routing_number: '110000000',
+              status_details: null,
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        data: [],
+      });
     mockSubscriptionsList.mockResolvedValue({ data: [] });
 
     const service = createService(databaseService);
@@ -552,7 +561,118 @@ describe('BillingService', () => {
     expect(mockPaymentMethodsList).toHaveBeenCalledWith({
       customer: 'cus_123',
       type: 'us_bank_account',
-      limit: 10,
+      limit: 5,
+    });
+    expect(mockPaymentMethodsList).toHaveBeenNthCalledWith(2, {
+      customer: 'cus_123',
+      type: 'card',
+      limit: 5,
+    });
+    expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+      invoice_settings: {
+        default_payment_method: 'pm_ach_123',
+      },
+    });
+  });
+
+  it('reports billing status from a saved card default payment method', async () => {
+    const databaseService = {
+      query: jest.fn().mockResolvedValue({
+        rows: [{ stripe_customer_id: 'cus_123' }],
+      }),
+      transaction: jest.fn(),
+    } as any;
+
+    mockCustomersRetrieve.mockResolvedValue({
+      id: 'cus_123',
+      invoice_settings: {
+        default_payment_method: 'pm_card_123',
+      },
+    });
+    mockPaymentMethodsRetrieve.mockResolvedValue({
+      id: 'pm_card_123',
+      type: 'card',
+      card: {
+        last4: '4242',
+        brand: 'visa',
+        exp_month: 4,
+        exp_year: 2031,
+      },
+    });
+    mockSubscriptionsList.mockResolvedValue({ data: [] });
+
+    const service = createService(databaseService);
+    const status = await service.getBillingStatus(55);
+
+    expect(status).toEqual({
+      hasPaymentMethod: true,
+      subscriptionStatus: null,
+      stripeCustomerId: 'cus_123',
+      paymentMethod: {
+        id: 'pm_card_123',
+        type: 'card',
+        last4: '4242',
+        brand: 'visa',
+        expMonth: 4,
+        expYear: 2031,
+      },
+    });
+    expect(mockPaymentMethodsRetrieve).toHaveBeenCalledWith('pm_card_123');
+    expect(mockPaymentMethodsList).not.toHaveBeenCalled();
+    expect(mockCustomersUpdate).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the most recent supported payment method when the saved default is missing', async () => {
+    const databaseService = {
+      query: jest.fn().mockResolvedValue({
+        rows: [{ stripe_customer_id: 'cus_123' }],
+      }),
+      transaction: jest.fn(),
+    } as any;
+
+    mockCustomersRetrieve.mockResolvedValue({
+      id: 'cus_123',
+      invoice_settings: {
+        default_payment_method: 'pm_missing',
+      },
+    });
+    mockPaymentMethodsRetrieve.mockRejectedValue({ code: 'resource_missing' });
+    mockPaymentMethodsList
+      .mockResolvedValueOnce({
+        data: [],
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 'pm_card_123',
+            type: 'card',
+            created: 200,
+            card: {
+              last4: '4242',
+              brand: 'visa',
+              exp_month: 4,
+              exp_year: 2031,
+            },
+          },
+        ],
+      });
+    mockSubscriptionsList.mockResolvedValue({ data: [] });
+
+    const service = createService(databaseService);
+    const status = await service.getBillingStatus(55);
+
+    expect(status.paymentMethod).toEqual({
+      id: 'pm_card_123',
+      type: 'card',
+      last4: '4242',
+      brand: 'visa',
+      expMonth: 4,
+      expYear: 2031,
+    });
+    expect(mockCustomersUpdate).toHaveBeenCalledWith('cus_123', {
+      invoice_settings: {
+        default_payment_method: 'pm_card_123',
+      },
     });
   });
 
